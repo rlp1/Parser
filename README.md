@@ -13,6 +13,23 @@ map = {1 = "A string", 2 = 2, 3 = 1.25}
 ```
 
 #### TODO:
-1. Lista reiteradas, ou seja, listas dentro de listas.
+1. Lista reiteradas, ou seja, listas dentro de listas. ✅ **Versão 1.0.1**
 2. Mapas reiterados, ou seja, mapas dentro de mapas.
-3. Adição da leitura do valor booleano (**true** ou **false**).
+3. Adição da leitura do valor booleano (**true** ou **false**). ✅ **Versão 1.0.1**
+
+## Versões
+### 1.0.1 (26, Dezembro de 2018)
+1. Adicionado a leitura de valores booleanos (**true** or **false**).
+2. Adicionado a leitura de lista reiteradas, ou seja, listas dentro de listas.
+3. Adição da leitura de valores numéricos com tipos explicitos.<br>
+&nbsp;**3.1. Exemplo, caso eu queira declarar um valor numérico do tipo "byte", logo:<br>**
+&nbsp;&nbsp;a = 1b -> A letra que declara o valor numérico do tipo byte pode ser "b" ou "B".<br>
+&nbsp;**3.2. Tipos de valores númericos.**
+      * ``b`` ou ``B``, declara o tipo **"byte"**.
+      * ``s`` ou ``S``, declara o tipo **"short"**.
+      * ``i`` ou ``I``, declara o tipo **"integer"**.
+      * ``f`` ou ``F``, declara o tipo **"float"**.
+      * ``d`` ou ``D``, declara o tipo **"double"**.
+      * ``l`` ou ``L``, declara o tipo **"long"**.<br>
+      **Obs: Se o número for de um tipo ``inteiro`` e não ter tipo explícito, logo o valor será do tipo "integer". Porém, caso o valor do
+      número seja do tipo ``ponto-flutuante`` e não ter tipo explícito, logo o valor será do tipo "double".**
