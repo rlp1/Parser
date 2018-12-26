@@ -3,8 +3,10 @@ package rlp.parser;
 import java.io.File;
 import java.io.FileReader;
 import java.io.IOException;
-import java.util.*;
-import java.util.logging.Logger;
+import java.util.LinkedHashMap;
+import java.util.LinkedList;
+import java.util.List;
+import java.util.Map;
 
 /**
  * @author rlp
@@ -12,293 +14,479 @@ import java.util.logging.Logger;
  */
 public class Parser {
 
-    private static final int END_OF_STREAM = -1;
+    /**
+     * This represents the integer value that indicates the end of file, when a file is reading by a FileReader, and then
+     * this integer value is check if the all characters already be read.
+     * @since 1.0
+     */
+    public static final int EOF = -1;
 
-    private final List<Character> buffer = new LinkedList<>();
-    private final Map<String, ComplexObject> variables = new LinkedHashMap<>();
+    /**
+     * This represents the character buffer that store the all characters that are read from the file.
+     * @since 1.0
+     */
+    private final List<Character> characterBuffer = new LinkedList<>();
 
+    /**
+     * This represents the file that will be read.
+     * @sincee 1.0
+     */
     private final File file;
 
-    private final Logger logger = Logger.getLogger("Parser");
-
-    private int pos;
+    private int pos = 0;
     private int linePos = 0;
+    private int skipArrays = 0;
 
-    private boolean stringInner;
-    private boolean arrayInner;
-    private boolean keyValueInner;
-
-    private boolean varDecl = true;
+    /**
+     * This represents the map that store the all complexes objects that is read by the parser and registered.
+     * @since 1.0
+     */
+    private final Map<String, ComplexObject> complexObjectMap = new LinkedHashMap<>();
 
     public Parser(final File file) {
-        if (file == null) throw new NullPointerException("file");
+        if (file == null) {
+            throw new NullPointerException("file must not be null");
+        }
+
         this.file = file;
     }
 
+    /**
+     * This method parse the file configuration.
+     * @since 1.0
+     */
     public void parse() {
-        //
-        // @Note This represents a "lazy" initialization, because the read from the characters of the file into the
-        // buffer can be made also when the constructor is declared because only each class is parsed by Parse class
-        // instance.
-        //
-        this.readToBuffer(file);
+        this.readToBuffer();
 
-        final StringBuilder varDeclaration = new StringBuilder();
-        final StringBuilder valueDeclaration = new StringBuilder();
+        final StringBuilder key = new StringBuilder();
+        final StringBuilder value = new StringBuilder();
 
-        while (this.pos < this.buffer.size()) {
+        boolean valueParse = false;
+        boolean inString = false;
+        boolean inArray = false;
+        boolean inMap = false;
+
+        // @Note This represents the while-loop condition, that do the all parse values from configuration.
+        while (this.pos < this.characterBuffer.size()) {
             final char c = this.next();
 
-            if (this.isCarriageReturn(c) && this.isNewLine(this.peek())) {
-                this.jump();
-                continue;
-            }
-
-            // @Note Check if the character is not in inner in string declaration, and if the current character is a
-            // whitespace, then continue the while-loop.
-            if (!this.stringInner && this.isWhitespace(c)) continue;
-
-            // @Note This token represents a "#" comment token, that make the jump from the line until a carriage
-            // return.
-            if (c == '#' && !this.stringInner) {
+            // @Note Check if the position from the character in the line is 0, and check if the character is equals of
+            // comment token "#", then jump the line.
+            if ((this.linePos == 0 && c == '#') && !inString) {
                 this.jumpLine();
                 continue;
             }
 
-            // @Note Check if the current character represents this token "=". Because this token represents the break
-            // from the variable name declaration to set the variable value declaration and the vice-versa.
-            if (c == '=' && !this.keyValueInner && !this.stringInner) {
-                this.varDecl = !this.varDecl;
-                continue;
-            }
+            // @Note Check if the current character represents a "String Token", that represents by the character ("),
+            // then change the boolean value about the inner string.
+            if (c == '\"') inString = !inString;
 
-            //
-            // @Note This variable "isLastCharacter" is used to fix a bug that always last variable value must be has
-            // a "," that represents the token that informs to parser that will parse a next variable key and value,
-            // then without this, it's not happen, then is used the check from the last character to not need check the
-            // token ",".
-            //  -rlp, 03/11/2018 09:17
-            //
-            final boolean isLastCharacter = this.pos == this.buffer.size();
+            // @Note If the current character represents a whitespace, and is not in a string, then continue this
+            // character to this character not read.
+            if (this.isWhitespace(c) && !inString) continue;
 
-            // @Note Check if the current character represents this token ",". Because this token represents the break
-            // from the variable declaration to make another variable declaration, then must be dispatch the current
-            // variable declaration into the map and clear the "varDeclaration" and "valueDeclaration" string buffers.
-            if (isLastCharacter || c == ',' && !this.stringInner && !this.arrayInner && !this.keyValueInner) {
-                // @Note This condition is check because the conditions use the "continue" when the characters are a
-                // token and it is not appended into the key or value declaration, but when the condition above is
-                // conditioned by the "isLastCharacter" this represents a character and not a token and it's will be
-                // not appended without this condition.
-                if (isLastCharacter) valueDeclaration.append(c);
-
-                final String name = varDeclaration.toString();
-                final String value = valueDeclaration.toString();
-
-                System.out.println("Value: " + valueDeclaration.toString());
-
-                final ComplexObject complexObjectValue = ComplexObject.newComplexObject(this.parseValue(value));
-
-                this.variables.put(name, complexObjectValue);
-
-                varDeclaration.delete(0, varDeclaration.length());
-                valueDeclaration.delete(0, valueDeclaration.length());
-
-                this.varDecl = true;
+            // @Note If the current character represents a carriage return, and the next character represents the
+            // new line, then return it, and jump the next character that represents the new line.
+            if (this.isCarriageReturn(c) && this.isNewLine(this.peek(0))) {
+                this.jump(1);
                 this.linePos = 0;
                 continue;
             }
 
+            // @Note Check if the current token represents a right bracket "[", that represents that the parser join in
+            // an array, and the other check if the current token represents a left bracket "]", that represents that the parser
+            // come out from array.
+            if (c == '[') {
+                inArray = true;
+                this.skipArrays++;
+            }
+            else if (c == ']') {
+                if (this.skipArrays == 1) inArray = false;
+                this.skipArrays--;
+            }
 
-            // @Note Check if the current character represents this token """. Because this token represents the inner
-            // from string characters.
-            if (c == '\"') this.stringInner = !this.stringInner;
-            if (c == '[') this.arrayInner = true;
-            if (c == ']') this.arrayInner = false;
-            if (c == '{') this.keyValueInner = true;
-            if (c == '}') this.keyValueInner = false;
+            // @Note Check if the current token represents a right brace "{", that represents that the parser join in
+            // a map, and the other check if the current token represents a left brace "}", that represents that the parser
+            // come out from map.
+            if (c == '{') inMap = true;
+            if (c == '}') inMap = false;
 
-            if (varDecl) varDeclaration.append(c);
-            else valueDeclaration.append(c);
+            // @Note This represents that the key parse is end, and now starts the value parse from this key-value.
+            if (c == '=' && !inMap) {
+                valueParse = true;
+                continue;
+            }
 
-            this.linePos++;
+            // @Note This represents the comma token (,), that represents that a new key-value will be parsed.
+            if ((c == ',' || this.pos == this.characterBuffer.size()) && !inString && !inArray && !inMap) {
+                // @Note This represents the parsed value from the key-value storage.
+                final Object parsedValue = this.parseValue(value.toString());
+
+                // @Note Put the key-value into the map.
+                this.complexObjectMap.put(key.toString(), new ComplexObject(parsedValue));
+
+                // @Note Reset the options.
+                valueParse = false;
+
+                key.delete(0, key.length());
+                value.delete(0, value.length());
+
+                // continue;
+            }
+
+            // @Note The append of the character must be before of check about the comma token ",", that represents
+            // that a new key-value will be storage.
+            if (!valueParse) key.append(c);
+            else value.append(c);
         }
     }
+
+    // ... Internal Methods ...
 
     private Object parseValue(final String value) {
-        final boolean isMap = value.startsWith("{");
-
-        if (isMap) {
-            boolean mapStringInner = false;
-            boolean varDecl = true;
-            final Map<Object, Object> map = new HashMap<>();
-
-            final StringBuilder mapKey = new StringBuilder();
-            final StringBuilder mapValue = new StringBuilder();
-
-            for (final char c : value.toCharArray()) {
-                if (c == '{') continue;
-                if (this.isWhitespace(c) && !mapStringInner) continue;
-
-                // @Note This token represents the break parse from the current value to the next value.
-                if ((c == '}' || c == ',') && !mapStringInner) {
-                    map.put(mapKey.toString(), mapValue.toString());
-
-                    mapKey.delete(0, mapKey.length());
-                    mapValue.delete(0, mapValue.length());
-
-                    varDecl = true;
-                    continue;
-                }
-
-                // @Note This token represents the "open/close" from a string.
-                if (c == '\"') mapStringInner = !mapStringInner;
-
-                // @Note This token represents the change from the variable name declaration to the variable value
-                // declaration.
-                if (c == '=') {
-                    varDecl = !varDecl;
-                    continue;
-                }
-
-                if (varDecl) mapKey.append(c);
-                else mapValue.append(c);
-            }
-
-            return map;
+        // @Note If the string value starts with "[" and ends with "]", this represents an array.
+        if (value.startsWith("[") && value.endsWith("]")) {
+            return this.parseArray(value.substring(1, value.length() - 1));
         }
 
-        final boolean isArray = value.startsWith("[");
-
-        if (isArray) {
-            boolean arrayStringInner = false;
-
-            final StringBuilder arrayValue = new StringBuilder();
-            final List<Object> list = new ArrayList<>();
-
-            int pos = 0;
-
-            for (final char c : value.toCharArray()) {
-                final int currentPos = pos++;
-
-                // @Note This represents the first bracket from the array that is "[". Then, how this is not appended
-                // into the character and will not be parsed, continue it.
-                if (currentPos == 0) continue;
-                if (this.isWhitespace(c) && !arrayStringInner) continue;
-
-                // @Note This token represents the break parse from the current value to the next value.
-                if (c == ',' && !arrayStringInner) {
-                    final Object parsedArrayValue = this.parseValue(arrayValue.toString());
-
-                    list.add(parsedArrayValue);
-
-                    arrayValue.delete(0, arrayValue.length());
-                    continue;
-                }
-
-                // @Note This token represents the "open/close" from a string.
-                if (c == '\"') arrayStringInner = !arrayStringInner;
-
-                arrayValue.append(c);
-            }
-
-            return list;
+        // @Note If the string valu starts with "{" and ends with "}", this represents a map.
+        if (value.startsWith("{") && value.endsWith("}")) {
+            return this.parseMap(value.substring(1, value.length() - 1));
         }
 
-        final boolean isNumberLiteral = this.isNumberLiteral(value);
-        final boolean isFloatingPointNumber = isNumberLiteral && value.contains(".");
-        final boolean isLongNumber = isNumberLiteral && !isFloatingPointNumber && value.length() > 10;
-        final boolean isDoubleFloatingPointNumber = isNumberLiteral && isFloatingPointNumber && this.isDoubleFloatingPoint(value);
-
-        // @Note Numbers
-        if (isNumberLiteral) {
-            if (isFloatingPointNumber) {
-                //
-                // @Note A strange bug that occurs with the last statement from the block of "if (isNumberLiteral)",
-                // make that this catch of if-statements must be created to fix this bug, the last statement
-                // must be verified to can found the possible error.
-                //  -rlp 31/10/2018 22:17
-                //
-                if(isDoubleFloatingPointNumber) {
-                    return Double.parseDouble(value);
-                } else {
-                    return Float.parseFloat(value);
-                }
-            } else {
-                return isLongNumber ? Long.parseLong(value) : Integer.parseInt(value);
-            }
-        }
-        // @Note Strings
-        else {
+        // @Note Check if the value represents a string, then parse this value as string.
+        if (value.startsWith("\"")) { // isString.
+            // @Note Is not necessary parse the string, then return the value.
+            //      -rlp, 24 December 2018
             return value;
         }
-    }
 
-    // @Note This method returns the "List<Object>" instead of already the "ComplexObject", because the main method to
-    // do this work is set to "parse" method.
-    private List<Object> parseArray(final String array) {
+        // @Note Check if the value represents a character, then parse this value as character.
+        if (value.startsWith("\'")) { // isCharacter.
+            // @Note This value represents a character, then the representation for any character is by format "'?'",
+            // then get the character that is positioned on the middle from this value, that represents the character
+            // that has index 1.
+
+            // @Incomplete: Has a problem that the characters can be wrote with "\/u????", etc. Then must be allow it
+            // to be parsed.
+            return value.charAt(1);
+        }
+
+        // @Note This conditions check if the value represents boolean values.
+        if (value.equals("true")) return true;
+        if (value.equals("false")) return false;
+
+        // @Note Check if the string represents a numeric string, then parse the number.
+        if (this.isNumericString(value)) {
+            return this.parseNumber(value);
+        }
+
         return null;
     }
 
-    private void readToBuffer(final File file) {
-        try (final FileReader reader = new FileReader(file)) {
-            int c; // char
-            while ((c = reader.read()) != END_OF_STREAM) {
-                this.buffer.add((char) c);
+    /**
+     * This method parse the map from a string value, into a map of objects.
+     * @param value the value that will be parsed from string.
+     * @return the map of objects.
+     * @since 1.0
+     */
+    private Map<Object, Object> parseMap(final String value) {
+        System.out.println("parseMap, Value: " + value);
+
+        final Map<Object, Object> map = new LinkedHashMap<>();
+        final char[] charArray = value.toCharArray();
+
+        final StringBuilder sbKey = new StringBuilder();
+        final StringBuilder sbValue = new StringBuilder();
+
+        boolean valueParse = false;
+        boolean inString = false;
+        boolean inArray = false;
+
+        int skipArrays = 0;
+
+        for (int i = 0; i < charArray.length; i++) {
+            final char c = charArray[i];
+
+            // @Note Check if the current character represents the string token ("), then this means that the current
+            // character join into a string or come out from a string.
+            if (c == '\"') inString = !inString;
+
+            // @Note Check if the current character represents the right bracket "[", that means the parse join in the
+            // array, or if the current character represents the left bracket "]", this means that the parse come out
+            // from the array.
+            if (c == '[') {
+                inArray = true;
+                skipArrays++;
+            }
+            else if (c == ']'){
+                if (skipArrays == 1) inArray = false;
+                skipArrays--;
+            }
+
+            // @Note Check if the character represents the equals token "=", then this means that what will be parse is
+            // the value.
+            if (c == '=') {
+                valueParse = true;
+                continue;
+            }
+
+            // @Note Check if the current character represents the comma token ",", then this means that a new key-value
+            // will be parsed.
+            if (c == ',' && !inString && !inArray) {
+                // @Note Put the key-value into the map, but the parsed value.
+                map.put(sbKey.toString(), this.parseValue(sbValue.toString()));
+
+                sbKey.delete(0, sbKey.length());
+                sbValue.delete(0, sbValue.length());
+
+                valueParse = false;
+                continue;
+            }
+
+            if (!valueParse) sbKey.append(c);
+            else sbValue.append(c);
+        }
+
+        return map;
+    }
+
+    /**
+     * This method parse the array from a string value, into a List of objects.
+     * @param value the value that will be parsed from string.
+     * @return the list of objects.
+     * @since 1.0
+     */
+    private List<Object> parseArray(final String value) {
+        final List<Object> list = new LinkedList<>();
+        final StringBuilder elementValue = new StringBuilder();
+        final char[] charArray = value.toCharArray();
+
+        boolean inString = false;
+        boolean inArray = false;
+
+        // @Note This represents a way to prevent the bug that occurs with the parse arrays in arrays, because this that
+        // this method only parse the "general array", that contains the other arrays.
+        //      -rlp, 26 December 2018
+        int skipArrays = 0;
+
+        for (int i = 0; i < charArray.length; i++) {
+            final char c = charArray[i];
+
+            // @Note Check if the current string represents a string token, that is represented by (").
+            if (c == '\"') inString = !inString;
+
+            if (c == '[') {
+                inArray = true;
+                skipArrays++;
+            }
+            if (c == ']') {
+                if (skipArrays == 1) inArray = false;
+                skipArrays--;
+            }
+
+            // @Note If the current character is a whitespace, and is not in a string, then continue it.
+            if (this.isWhitespace(c) && !inString) continue;
+
+            // @Note This represents the comma token that is in a array and is represented by ",", and means that a new
+            // element will be parsed.
+            if (c == ',' && !inString && !inArray) {
+                // @Note Parse the current element value to the object value, and add into the list.
+                list.add(this.parseValue(elementValue.toString()));
+
+                elementValue.delete(0, elementValue.length());
+                continue;
+            }
+
+            elementValue.append(c);
+        }
+
+        return list;
+    }
+
+    /**
+     * This method parse the string that represents a number literal.
+     * @param value the value that will be parsed.
+     * @return the number that is parsed from string value.
+     * @since 1.0
+     */
+    private Object parseNumber(final String value) {
+        // @Note Check if the number has type declaration. (i. e. 10L, 2.0d, 1b)
+        final boolean hasTypeDeclaration = !Character.isDigit(value.charAt(value.length() - 1));
+
+        // @Note Parse the number by boxed-type from each data type.
+        if (hasTypeDeclaration) {
+            final int typeDeclarationIndex = value.length() - 1;
+            final char typeDeclaration = value.charAt(typeDeclarationIndex);
+
+            // @Note The number literal value has the type declaration that represents a non-digit character, then must
+            // remove this non-digit character from the value. Is important that creates a new string to re-assign the
+            // value without the type declaration because before this modify the debugging output about the input value.
+            //      -rlp, 26 December 2018
+            final String reassignedValue = value.substring(0, typeDeclarationIndex);
+
+            // @Note Check if the type declaration is a "long".
+            if (typeDeclaration == 'l' || typeDeclaration == 'L') {
+                return Long.parseLong(reassignedValue);
+            }
+            // @Note Check if the type declaration is a "double".
+            else if (typeDeclaration == 'd' || typeDeclaration == 'D') {
+                return Double.parseDouble(reassignedValue);
+            }
+            // @Note Check if the type declaration is a "float".
+            else if (typeDeclaration == 'f' || typeDeclaration == 'F') {
+                return Float.parseFloat(reassignedValue);
+            }
+            // @Note Check if the type declaration is an "integer".
+            else if (typeDeclaration == 'i' || typeDeclaration == 'I') {
+                return Integer.parseInt(reassignedValue);
+            }
+            // @Note Check if the type declaration is a "short".
+            else if (typeDeclaration == 's' || typeDeclaration == 'S') {
+                return Short.parseShort(reassignedValue);
+            }
+            // @Note Check if the type declaration is a "byte".
+            else if (typeDeclaration == 'b' || typeDeclaration == 'B') {
+                return Byte.parseByte(reassignedValue);
+            }
+        }
+        // @Note This part represents the numbers that doesn't has explicit-type declaration.
+        else {
+            // @Note If the value contains the "." token, this represents that the number is a floating-point number or
+            // if the value contains "," this represents a currency number.
+            if (value.contains(".") || value.contains(",")) {
+                // @Note The default data type that a floating-number is parsed is into "double".
+                return Double.parseDouble(value);
+            }
+            // @Note This part include only integer numbers, "byte", "short", "integer" and "long".
+            else {
+                // @Note The approach of if-else removes the strange bug that occurs when use ternary operator (?:),
+                // then continues use it.
+                if (value.length() > 10) {
+                    return Long.parseLong(value);
+                } else {
+                    return Integer.parseInt(value);
+                }
+            }
+        }
+
+        throw new RuntimeException("The number \"" + value + "\" can\'t be parsed.");
+    }
+
+    /**
+     * This method read the all characters that contains in the file into the character buffer.
+     * @since 1.0
+     */
+    private void readToBuffer() {
+        try (final FileReader reader = new FileReader(this.file)) {
+            // @Note This represents the character value, on this character value is cast to character and put into
+            // the character buffer.
+            int c;
+            while ((c = reader.read()) != EOF) {
+                this.characterBuffer.add((char) c);
             }
         } catch (IOException e) {
-            this.logger.severe("Occur an error when read the file \"" + file.getName() + "\" into buffer.");
+            System.out.println("An error occured when read the file into the buffer.");
             e.printStackTrace();
         }
     }
 
+    /**
+     * This method get the character that is in the current position, and increase the position.
+     * @return the character that is in the current position.
+     * @since 1.0
+     */
     private char next() {
-        // @Note Get the current character that is located in the current position, and increment position.
-        return this.buffer.get(this.pos++);
+        return this.characterBuffer.get(this.pos++);
     }
 
-    private char peek(final int n) {
-        if (n < 0) throw new IllegalArgumentException("n can\'t be less than 0.");
-        return this.buffer.get(this.pos + n);
+    /**
+     * This method jump a amount of characters.
+     * @param amount the amount of characters that the parser jump.
+     * @since 1.0
+     */
+    private void jump(final int amount) {
+        this.pos += amount;
     }
 
-    private char peek() {
-        return this.peek(0);
-    }
+    /**
+     * This method jump the all line.
+     * @since 1.0
+     */
+    private void jumpLine() {
+        while (!(this.isCarriageReturn(this.next()))) {
+            this.jump(1);
+        }
 
-    private void jump(final int n) {
-        this.pos += n;
-    }
-
-    private void jump() {
+        // @Note Not remove this jump from here, because this method jump the character of new line.
         this.jump(1);
     }
 
-    private void jumpLine() {
-        // @Note Walk the line.
-        for (int currentPos = this.pos; currentPos < this.buffer.size(); currentPos++) {
-            if (this.isCarriageReturn(this.next())) {
-                this.jump();
-                break;
-            }
-        }
+    /**
+     * This method get the character that is in the buffer of "amount" positions. The "amount" number must be non negative,
+     * and the amount of nubmers can not exceed the limit from the character buffer size.
+     * @param amount the amount of characters to peek the character.
+     * @return the peek character.
+     * @since 1.0
+     */
+    private char peek(int amount) {
+        if (amount < 0) throw new IllegalArgumentException("amount must be non negative.");
+        if (this.pos + amount > this.characterBuffer.size()) throw new IllegalArgumentException("amount of \"" + amount
+                + "\" exceeds the limit of the buffer.");
+
+        return this.characterBuffer.get(this.pos + amount);
     }
 
+    /**
+     * This method check if the character represents a whitespace character.
+     * @param c the character that will be checked.
+     * @return true if the character is a whitespace, otherwise returns false.
+     */
     private boolean isWhitespace(final char c) {
         return c == 32;
     }
 
+    /**
+     * This method check if the character represents a carriage return.
+     * @param c the character that will be checked.
+     * @return true if the character is a carriage return, otehrwise returns false.
+     */
     private boolean isCarriageReturn(final char c) {
         return c == 13;
     }
 
+    /**
+     * This method check if the character represents a new line.
+     * @param c the character that will be checked.
+     * @return true if the character is a new line, otherwise returns false.
+     */
     private boolean isNewLine(final char c) {
         return c == 10;
     }
 
-    private boolean isNumberLiteral(final String string) {
-        for (final char c : string.toCharArray()) {
-            // @Note The number can be a "1.0".
-            if (c == '.') continue;
+    /**
+     * This method check if the string is a numeric string, that means that the all characters from the string is a number.
+     * @param string the string that will be checked.
+     * @return true if string is a numeric string, otherwise returns false.
+     * @since 1.0
+     */
+    private boolean isNumericString(final String string) {
+        final char[] charArray = string.toCharArray();
+
+        for (int i = 0; i < charArray.length; i++) {
+            final char c = charArray[i];
+
+            // @Note This represents a some exceptions when check if the string represents a numeric string, because the
+            // value can be a floating point and can contains the character ".", or the value can be a currency value and
+            // contains the "," character.
+            //      -rlp, 24 December 2018
+            if (c == '.' || c == ',') continue;
+
+            // @Note This represents an exception that when the last character from the string is a "b" or "s", declare
+            // that the number is a byte when "b" or short when "s".
+            if (i == charArray.length - 1 &&
+                    ((c == 'B' || c == 'S' || c == 'F' || c == 'D' || c == 'L' || c == 'I') ||
+                            (c == 'b' || c == 's' || c == 'f' || c == 'd' || c == 'l' || c == 'i'))) continue;
 
             if (!Character.isDigit(c)) {
                 return false;
@@ -307,36 +495,25 @@ public class Parser {
         return true;
     }
 
-    private boolean isDoubleFloatingPoint(final String string) {
-        // @Note Single line code. The first part of the boolean condition check, represents the check from the integral
-        // part of the floating-point number. In the second part of the boolean condition check, represents the check
-        // from the mantissa of the floating-point number.
-        // return string.substring(0, string.indexOf('.')).length() > 10 || string.substring(string.indexOf('.') + 1).length() > 7;
-
-        final String mantissa = string.substring(string.indexOf('.') + 1);
-
-        // @Note Check if the mantissa length is bigger than 7, this represents that the current flaoting-point number
-        // is a double floating-point number, but if the mantissa is less than or equals 7 this is not guarantee that
-        // the number will be a floating-point number or a double floating-point number, in this case check the integer
-        // from the number.
-        if (mantissa.length() > 7) return true;
-
-        final String integralPart = string.substring(0, string.indexOf('.'));
-
-        // @Note When the integral part from a number is bigger than 10, this represents a long number.
-        return integralPart.length() > 10;
+    /**
+     * This method returns the map that contains the all complexes object.
+     *
+     * @Note This method is not to be public, then this method is only available
+     * to be called while the testing functions.
+     *
+     * @return the complexes object map.
+     * @since 1.0
+     */
+    public Map<String, ComplexObject> getComplexObjectMap() {
+        return complexObjectMap;
     }
 
-    // @Test
-    public List<Character> getBuffer() {
-        return buffer;
+    /**
+     * This method get the value by the key.
+     * @param key the key from the value.
+     * @return the ComplexObject that is referred by the key.
+     */
+    public ComplexObject get(final String key) {
+        return this.complexObjectMap.get(key);
     }
-
-    // @Test
-    public Map<String, ComplexObject> getVariables() {
-        return variables;
-    }
-
-    // @Test
-    public ComplexObject get(final String key) { return this.variables.get(key); }
 }
