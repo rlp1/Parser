@@ -16,6 +16,7 @@ map = {1 = "A string", 2 = 2, 3 = 1.25}
 1. Lista reiteradas, ou seja, listas dentro de listas. ✅ **Versão 1.0.1**
 2. Mapas reiterados, ou seja, mapas dentro de mapas.
 3. Adição da leitura do valor booleano (**true** ou **false**). ✅ **Versão 1.0.1**
+4. Comentários de linhas conjuntas.
 
 ## Versões
 ### 1.0.1 (26, Dezembro de 2018)
